@@ -1,0 +1,100 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/*
+ * Command line interface: sign and verify XAdES-BES XML documents.
+ *
+ * Usage:
+ *   bin/xades-bes sign <p12> <password> <input.xml|input-dir> [output-...]
+ *   bin/xades-bes verify <signed.xml>
+ */
+
+use XadesBesSigner\BatchSigner;
+use XadesBesSigner\Certificate\P12CertificateLoader;
+use XadesBesSigner\Signature\SignatureContext;
+use XadesBesSigner\Signer;
+use XadesBesSigner\Verification\Verifier;
+
+if (! file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    fwrite(STDERR, "vendor/autoload.php not found. Run `composer install` first.\n");
+    exit(1);
+}
+
+require __DIR__ . '/../vendor/autoload.php';
+
+$command = $argv[1] ?? null;
+
+function usage(int $code = 0): never
+{
+    $help = <<<HELP
+XAdES-BES Signer (SRI compliant)
+
+Usage:
+  xades-bes sign <p12-file> <password> <xml|dir> [output]     Sign a file or every *.xml in a dir
+  xades-bes verify <signed.xml>                               Verify a signed document
+
+Options:
+  --sha256      Use SHA-256 digests and rsa-sha256 instead of the default SHA-1
+
+HELP;
+        fwrite($code === 0 ? STDOUT : STDERR, $help);
+        exit($code);
+}
+
+try {
+    switch ($command) {
+        case 'sign':
+            if (count($argv) < 5) {
+                usage();
+            }
+            $digest = in_array('--sha256', $argv, true) ? 'sha256' : 'sha1';
+            $key = P12CertificateLoader::fromFile($argv[2], $argv[3], $digest);
+            $batch = BatchSigner::with($key);
+            $context = new SignatureContext($digest);
+
+            $path = $argv[4];
+            if (is_dir($path)) {
+                $output = $argv[5] ?? ($path . '-signed');
+                $results = $batch->signDirectory($path, $output, $context);
+                foreach ($results as $source => $target) {
+                    echo "signed  {$source}  ->  {$target}\n";
+                }
+            } elseif (is_file($path)) {
+                $output = $argv[5] ?? null;
+                $signed = (new Signer($key))->signFromFile($path, $context);
+                $target = $output ?? (pathinfo($path, PATHINFO_DIRNAME) . DIRECTORY_SEPARATOR
+                    . pathinfo($path, PATHINFO_FILENAME) . '-signed.xml');
+                file_put_contents($target, $signed);
+                echo "signed  {$path}  ->  {$target}\n";
+            } else {
+                fwrite(STDERR, "Input not found: {$path}\n");
+                exit(1);
+            }
+            break;
+
+        case 'verify':
+            if (count($argv) < 3) {
+                usage();
+            }
+            $verifier = new Verifier();
+            $result = $verifier->verifyFromFile($argv[2]);
+            if ($result->isValid()) {
+                echo "OK  signature={$result->getSignatureId()} signer={$result->getSignerCommonName()} time={$result->getSigningTime()?->format('c')}\n";
+            } else {
+                echo "INVALID\n";
+                foreach ($result->getErrors() as $error) {
+                    echo "  - {$error}\n";
+                }
+                exit(1);
+            }
+            break;
+
+        default:
+            usage();
+    }
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'Error: ' . $e->getMessage() . "\n");
+    exit(1);
+}
