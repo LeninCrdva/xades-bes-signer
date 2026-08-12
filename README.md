@@ -37,7 +37,7 @@ referencia XAdES4J que el SRI acepta).
 ## Instalación
 
 ```bash
-composer require lenin/xades-bes-signer
+composer require lenincrdva/xades-bes-signer
 ```
 
 ## OpenSSL 3.x: activar el proveedor legacy
