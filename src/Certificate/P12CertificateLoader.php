@@ -19,7 +19,7 @@ final class P12CertificateLoader
     public static function fromFile(
         string $path,
         string $passphrase,
-        string $digestAlgorithm = DigestCalculator::SHA256
+        string $digestAlgorithm = DigestCalculator::SHA1
     ): OpensslPrivateKeySigner {
         if (! is_file($path) || ! is_readable($path)) {
             throw new CertificateException('P12 file is not readable: ' . $path);
@@ -39,7 +39,7 @@ final class P12CertificateLoader
     public static function fromString(
         string $content,
         string $passphrase,
-        string $digestAlgorithm = DigestCalculator::SHA256
+        string $digestAlgorithm = DigestCalculator::SHA1
     ): OpensslPrivateKeySigner {
         $certs = [];
         $ok = openssl_pkcs12_read($content, $certs, $passphrase);

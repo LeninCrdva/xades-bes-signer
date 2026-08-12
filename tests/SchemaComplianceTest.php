@@ -20,7 +20,7 @@ final class SchemaComplianceTest extends TestCase
         Fixtures::p12();
     }
 
-    private function assertValidatesAgainstSrinSchema(string $xml): void
+    private function assertValidatesAgainstSchema(string $xml): void
     {
         libxml_use_internal_errors(true);
         $dom = new \DOMDocument('1.0', 'UTF-8');
