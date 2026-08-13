@@ -88,7 +88,7 @@ final class XadesVerifierTest extends TestCase
     public function testTamperingWithSignedPropertiesInvalidatesPropertiesDigest(): void
     {
         $signed = $this->sign();
-        $tampered = str_replace('<xades:MimeType>text/xml</xades:MimeType>', '<xades:MimeType>application/xml</xades:MimeType>', $signed);
+        $tampered = str_replace('<etsi:MimeType>text/xml</etsi:MimeType>', '<etsi:MimeType>application/xml</etsi:MimeType>', $signed);
         self::assertNotSame($signed, $tampered);
 
         $result = $this->verifier->verifyFromString($tampered);
@@ -111,6 +111,6 @@ final class XadesVerifierTest extends TestCase
 
         self::assertSame('Firma Prueba Test', $result->getSignerCommonName());
         self::assertNotNull($result->getSigningTime());
-        self::assertStringStartsWith('Signature-', $result->getSignatureId() ?? '');
+        self::assertMatchesRegularExpression('/^Signature\d+$/', $result->getSignatureId() ?? '');
     }
 }
