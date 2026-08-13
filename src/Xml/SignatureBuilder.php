@@ -12,7 +12,7 @@ use XadesBesSigner\Signature\SignatureValueCalculator;
  * Builds the ds:Signature envelope that makes up the XAdES-BES signature.
  *
  * The structure mirrors the SRI reference implementation (XAdES4J): three
- * references inside ds:SignedInfo (xades:SignedProperties, ds:KeyInfo and the
+ * references inside ds:SignedInfo (etsi:SignedProperties, ds:KeyInfo and the
  * document), a ds:KeyValue with the RSA public key next to ds:X509Data, and
  * base64 payloads wrapped at 76 characters per line.
  *
@@ -20,12 +20,12 @@ use XadesBesSigner\Signature\SignatureValueCalculator;
  * following construction order:
  *
  *  1. Build the skeleton (empty DigestValue / SignatureValue placeholders and
- *     the xades:SignedProperties block in place).
+ *     the etsi:SignedProperties block in place).
  *  2. Compute the digest of the document. Since only the *original* document
  *     is the reference input (the enveloped-signature transform removes the
  *     ds:Signature element before hashing), the digest is computed BEFORE the
  *     signature element is appended to the root.
- *  3. Compute the digest of xades:SignedProperties from its document node.
+ *  3. Compute the digest of etsi:SignedProperties from its document node.
  *  4. Compute the digest of ds:KeyInfo from its document node.
  *  5. Fill the DigestValue placeholders in SignedInfo.
  *  6. Canonicalize SignedInfo and compute the SignatureValue.
@@ -35,7 +35,7 @@ final class SignatureBuilder
 {
     private const DS_PREFIX = 'ds';
 
-    private const XADES_PREFIX = 'xades';
+    private const XADES_PREFIX = 'etsi';
 
     private const BASE64_LINE_LENGTH = 76;
 
@@ -61,6 +61,8 @@ final class SignatureBuilder
 
     private string $keyInfoId;
 
+    private string $referenceDocumentId;
+
     public function __construct(
         private readonly XmlDocument $xml,
         private readonly SignatureContext $context,
@@ -69,7 +71,8 @@ final class SignatureBuilder
         $this->doc = $xml->getDom();
         $this->signatureId = $context->generateSignatureId();
         $this->signedPropertiesId = $this->signatureId . '-SignedProperties';
-        $this->keyInfoId = 'Certificate' . bin2hex(random_bytes(4));
+        $this->keyInfoId = 'Certificate' . SignatureContext::generateNumericId();
+        $this->referenceDocumentId = 'Reference-ID-' . SignatureContext::generateNumericId();
     }
 
     public static function sign(
@@ -106,11 +109,14 @@ final class SignatureBuilder
         $signature->appendChild($this->buildQualifyingProperties());
 
         /*
-         * Namespace normalization MUST run before digest/signature
-         * computation: C14N renders the namespace declarations that are in
-         * scope, so sign and verify must see identical canonical forms.
+         * The reference implementation declares the ds/etsi namespaces
+         * directly on SignedInfo, SignedProperties and KeyInfo before
+         * computing their canonical forms, so the C14N input is
+         * self-contained regardless of where the prefixes are also declared.
          */
-        $this->normalizeNamespaces($signature);
+        $this->ensureNamespaces($this->signedInfo);
+        $this->ensureNamespaces($this->signedProperties);
+        $this->ensureNamespaces($this->keyInfo);
 
         /*
          * Document digest: the enveloped-signature transform removes the whole
@@ -135,42 +141,15 @@ final class SignatureBuilder
     }
 
     /**
-     * DOMDocument::createElementNS() binds a namespaced prefix to every node
-     * it creates, which leads to redundant xmlns:* declarations once the
-     * elements are assembled. Emitted XML is valid either way, but the SRI
-     * reference implementation (XAdES4J) produces a single declaration pair on
-     * ds:Signature. This pass re-declares both prefixes on the signature root
-     * and strips the redundant per-node declarations.
+     * Declares the ds/etsi namespace prefixes on the given element, mirroring
+     * the SRI reference implementation: the canonical form of SignedInfo,
+     * SignedProperties and KeyInfo must carry both declarations on the node
+     * itself so C14N output is identical to the validator's expectation.
      */
-    private function normalizeNamespaces(\DOMElement $signature): void
+    private function ensureNamespaces(\DOMElement $element): void
     {
-        $declared = [];
-        foreach ($signature->attributes as $attribute) {
-            if ($attribute->namespaceURI === 'http://www.w3.org/2000/xmlns/'
-                && in_array($attribute->localName, [self::DS_PREFIX, self::XADES_PREFIX], true)) {
-                $declared[$attribute->localName] = true;
-            }
-        }
-
-        foreach ([self::DS_PREFIX, self::XADES_PREFIX] as $prefix) {
-            if (! isset($declared[$prefix])) {
-                $signature->setAttributeNS(
-                    'http://www.w3.org/2000/xmlns/',
-                    'xmlns:' . $prefix,
-                    $prefix === self::DS_PREFIX ? Namespaces::XMLDSIG : Namespaces::XADES
-                );
-            }
-        }
-
-        $elements = [];
-        foreach ($signature->getElementsByTagName('*') as $element) {
-            $elements[] = $element;
-        }
-
-        foreach ($elements as $element) {
-            $element->removeAttribute('xmlns:' . self::DS_PREFIX);
-            $element->removeAttribute('xmlns:' . self::XADES_PREFIX);
-        }
+        $element->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . self::DS_PREFIX, Namespaces::XMLDSIG);
+        $element->setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:' . self::XADES_PREFIX, Namespaces::XADES);
     }
 
     private function createSignatureElement(): \DOMElement
@@ -207,7 +186,7 @@ final class SignatureBuilder
     private function createReferenceDocument(): \DOMElement
     {
         $reference = $this->doc->createElementNS(Namespaces::XMLDSIG, self::DS_PREFIX . ':Reference');
-        $reference->setAttribute('Id', $this->signatureId . '-Reference');
+        $reference->setAttribute('Id', $this->referenceDocumentId);
 
         $rootId = $this->xml->getRootElement()->getAttribute('id');
         if ($rootId === '') {
@@ -270,7 +249,10 @@ final class SignatureBuilder
 
     private function createSignatureValue(): \DOMElement
     {
-        return $this->doc->createElementNS(Namespaces::XMLDSIG, self::DS_PREFIX . ':SignatureValue');
+        $element = $this->doc->createElementNS(Namespaces::XMLDSIG, self::DS_PREFIX . ':SignatureValue');
+        $element->setAttribute('Id', 'SignatureValue' . SignatureContext::generateNumericId());
+
+        return $element;
     }
 
     private function buildKeyInfo(): \DOMElement
@@ -371,7 +353,7 @@ final class SignatureBuilder
         $properties = $this->doc->createElementNS(Namespaces::XADES, self::XADES_PREFIX . ':SignedDataObjectProperties');
 
         $dataObjectFormat = $this->doc->createElementNS(Namespaces::XADES, self::XADES_PREFIX . ':DataObjectFormat');
-        $dataObjectFormat->setAttribute('ObjectReference', '#' . $this->signatureId . '-Reference');
+        $dataObjectFormat->setAttribute('ObjectReference', '#' . $this->referenceDocumentId);
 
         $description = $this->doc->createElementNS(Namespaces::XADES, self::XADES_PREFIX . ':Description');
         $description->appendChild($this->doc->createTextNode('contenido comprobante'));

@@ -16,9 +16,9 @@ use XadesBesSigner\Xml\XmlDocument;
  *  1. RSA signature of the canonicalized SignedInfo (algorithm derived from
  *     the ds:SignatureMethod element: SHA-1 or SHA-256).
  *  2. Digest of the document with the ds:Signature element removed.
- *  3. Digest of the xades:SignedProperties element.
+ *  3. Digest of the etsi:SignedProperties element.
  *  4. Digest of the ds:KeyInfo element.
- *  5. xades:CertDigest / xades:IssuerSerial inside SignedProperties match the
+ *  5. etsi:CertDigest / etsi:IssuerSerial inside SignedProperties match the
  *     certificate embedded in ds:KeyInfo.
  *  6. Embedded certificate validity window.
  */
@@ -26,7 +26,7 @@ final class Verifier
 {
     private const DS_PREFIX = 'ds';
 
-    private const XADES_PREFIX = 'xades';
+    private const XADES_PREFIX = 'etsi';
 
     public function verifyFromString(string $signedXml): VerificationResult
     {
@@ -457,7 +457,10 @@ final class Verifier
         }
 
         $text = trim($nodes->item(0)->textContent);
-        $date = \DateTimeImmutable::createFromFormat('Y-m-d\TH:i:s\Z', $text, new \DateTimeZone('UTC'));
+        $date = \DateTimeImmutable::createFromFormat('Y-m-d\TH:i:sP', $text);
+        if ($date === false) {
+            $date = \DateTimeImmutable::createFromFormat('Y-m-d\TH:i:s\Z', $text, new \DateTimeZone('UTC'));
+        }
         if ($date === false) {
             $date = \DateTimeImmutable::createFromFormat(\DateTime::ATOM, $text);
         }

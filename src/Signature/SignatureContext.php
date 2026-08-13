@@ -22,16 +22,21 @@ final class SignatureContext
 
     public function getSigningTime(): \DateTimeImmutable
     {
-        return $this->signingTime ?? new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        return $this->signingTime ?? new \DateTimeImmutable('now', new \DateTimeZone('America/Guayaquil'));
     }
 
     public function toXsdDateTime(): string
     {
-        return $this->getSigningTime()->format('Y-m-d\TH:i:s\Z');
+        return $this->getSigningTime()->format('Y-m-d\TH:i:sP');
     }
 
     public function generateSignatureId(): string
     {
-        return $this->signatureId ?? 'Signature-' . bin2hex(random_bytes(4));
+        return $this->signatureId ?? 'Signature' . self::generateNumericId();
+    }
+
+    public static function generateNumericId(): string
+    {
+        return (string) random_int(990, 99999);
     }
 }

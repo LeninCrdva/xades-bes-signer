@@ -7,26 +7,13 @@ namespace XadesBesSigner\Certificate;
 use XadesBesSigner\Exception\CertificateException;
 use XadesBesSigner\Xml\DigestCalculator;
 
-/**
- * X.509 certificate value object with the data points needed by XAdES-BES:
- * DER payload, digest, RFC2253 issuer name and decimal serial number.
- */
-final class Certificate
-{
     /**
-     * Order used by Java's X500Principal (and therefore XAdES4J) when printing
-     * an RFC2253 DN: most-specific attribute first.
+     * X.509 certificate value object with the data points needed by XAdES-BES:
+     * DER payload, digest, SRI issuer name and decimal serial number.
      */
-    private const RFC2253_ORDER = [
-        'CN', 'OU', 'O', 'L', 'ST', 'C', 'T', 'SERIALNUMBER', 'E', 'EMAILADDRESS', 'STREET', 'POSTALCODE', 'UID',
-    ];
-
-    private const RFC2253_ALIASES = [
-        'emailAddress' => 'EMAILADDRESS',
-        'serialNumber' => 'SERIALNUMBER',
-    ];
-
-    private \OpenSSLCertificate $certificate;
+    final class Certificate
+    {
+        private \OpenSSLCertificate $certificate;
 
     /** @var array<string, mixed> */
     private array $parsed;
@@ -89,7 +76,7 @@ final class Certificate
     }
 
     /**
-     * Base64 digest of the DER certificate, as required by xades:CertDigest.
+     * Base64 digest of the DER certificate, as required by etsi:CertDigest.
      */
     public function getDigest(string $algorithm = DigestCalculator::SHA256): string
     {
@@ -108,19 +95,66 @@ final class Certificate
     }
 
     /**
-     * Issuer distinguished name in RFC2253 form (ds:X509IssuerName).
+     * Issuer distinguished name as expected by the SRI validator
+     * (ds:X509IssuerName). Mirrors the SRI reference implementation:
+     *
+     *  - UANATACA  prepends the organizationIdentifier (2.5.4.97) and uses a
+     *    comma-joined CN,OU,O,L,C order without spaces;
+     *  - FIRMASEGURA uses the C,O,OU,ST,CN,L order joined with ", ";
+     *  - any other issuer uses the CN,L,OU,O,C order joined with ",".
      */
     public function getIssuerName(): string
     {
-        return $this->buildRfc2253($this->parsed['issuer'] ?? []);
+        $issuer = $this->parsed['issuer'] ?? [];
+
+        return $this->buildSriDn($issuer);
     }
 
     /**
-     * Subject distinguished name in RFC2253 form.
+     * Subject distinguished name in the same SRI order used for the issuer.
      */
     public function getSubjectName(): string
     {
-        return $this->buildRfc2253($this->parsed['subject'] ?? []);
+        return $this->buildSriDn($this->parsed['subject'] ?? []);
+    }
+
+    /**
+     * @param array<string, mixed> $fields
+     */
+    private function buildSriDn(array $fields): string
+    {
+        $cn = (string) ($fields['CN'] ?? '');
+
+        if (str_contains($cn, 'UANATACA')) {
+            return implode(',', [
+                '2.5.4.97=#0c0f56415445532d413636373231343939',
+                'CN=' . $fields['CN'],
+                'OU=' . $fields['OU'],
+                'O=' . $fields['O'],
+                'L=' . $fields['L'],
+                'C=' . $fields['C'],
+            ]);
+        }
+
+        if (str_contains($cn, 'FIRMASEGURA')) {
+            $parts = [];
+            foreach (['C', 'O', 'OU', 'ST', 'CN', 'L'] as $attribute) {
+                if (isset($fields[$attribute]) && $fields[$attribute] !== '') {
+                    $parts[] = $attribute . '=' . $fields[$attribute];
+                }
+            }
+
+            return implode(', ', $parts);
+        }
+
+        $parts = [];
+        foreach (['CN', 'L', 'OU', 'O', 'C'] as $attribute) {
+            if (isset($fields[$attribute]) && $fields[$attribute] !== '') {
+                $parts[] = $attribute . '=' . $fields[$attribute];
+            }
+        }
+
+        return implode(',', $parts);
     }
 
     /**
@@ -212,42 +246,6 @@ final class Certificate
         }
 
         return ['n' => base64_encode($details['rsa']['n']), 'e' => base64_encode($details['rsa']['e'])];
-    }
-
-    /**
-     * Build an RFC2253 string from the parsed subject/issuer array using a
-     * canonical attribute order and RFC2253 escaping.
-     *
-     * @param array<string, mixed> $fields
-     */
-    private function buildRfc2253(array $fields): string
-    {
-        $normalized = [];
-        foreach ($fields as $key => $value) {
-            $normalized[self::RFC2253_ALIASES[$key] ?? strtoupper((string) $key)] = (string) $value;
-        }
-
-        $parts = [];
-        foreach (self::RFC2253_ORDER as $key) {
-            if (! isset($normalized[$key])) {
-                continue;
-            }
-            $parts[] = $key . '=' . self::escapeRfc2253($normalized[$key]);
-        }
-
-        foreach ($normalized as $key => $value) {
-            if (in_array($key, self::RFC2253_ORDER, true)) {
-                continue;
-            }
-            $parts[] = $key . '=' . self::escapeRfc2253($value);
-        }
-
-        return implode(', ', $parts);
-    }
-
-    private static function escapeRfc2253(string $value): string
-    {
-        return (string) preg_replace('/([,+"\\\\<>;])/', '\\\\$1', $value);
     }
 
     private function dateFromAsn1(string $asn1): \DateTimeImmutable

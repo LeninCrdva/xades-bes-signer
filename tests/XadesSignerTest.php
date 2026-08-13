@@ -35,7 +35,7 @@ final class XadesSignerTest extends TestCase
         $dom->loadXML($xml);
         $xpath = new \DOMXPath($dom);
         $xpath->registerNamespace('ds', Namespaces::XMLDSIG);
-        $xpath->registerNamespace('xades', Namespaces::XADES);
+        $xpath->registerNamespace('etsi', Namespaces::XADES);
 
         return $xpath;
     }
@@ -90,11 +90,25 @@ final class XadesSignerTest extends TestCase
     {
         $xpath = $this->xpath($this->sign());
 
-        self::assertSame(1, $xpath->query('//xades:SignedProperties/xades:SignedSignatureProperties/xades:SigningTime')->length);
-        self::assertSame(1, $xpath->query('//xades:SignedProperties/xades:SignedSignatureProperties/xades:SigningCertificate/xades:Cert')->length);
-        self::assertSame(1, $xpath->query('//xades:SignedProperties/xades:SignedDataObjectProperties/xades:DataObjectFormat/xades:Description')->length);
-        self::assertSame('contenido comprobante', $xpath->query('//xades:DataObjectFormat/xades:Description')->item(0)?->textContent);
-        self::assertSame('text/xml', $xpath->query('//xades:DataObjectFormat/xades:MimeType')->item(0)?->textContent);
+        self::assertSame(1, $xpath->query('//etsi:SignedProperties/etsi:SignedSignatureProperties/etsi:SigningTime')->length);
+        self::assertSame(1, $xpath->query('//etsi:SignedProperties/etsi:SignedSignatureProperties/etsi:SigningCertificate/etsi:Cert')->length);
+        self::assertSame(1, $xpath->query('//etsi:SignedProperties/etsi:SignedDataObjectProperties/etsi:DataObjectFormat/etsi:Description')->length);
+        self::assertSame('contenido comprobante', $xpath->query('//etsi:DataObjectFormat/etsi:Description')->item(0)?->textContent);
+        self::assertSame('text/xml', $xpath->query('//etsi:DataObjectFormat/etsi:MimeType')->item(0)?->textContent);
+
+        // SigningTime is emitted in America/Guayaquil with an explicit offset
+        // (e.g. 2026-08-12T10:30:00-05:00), as in the SRI reference.
+        $signingTime = $xpath->query('//etsi:SigningTime')->item(0)?->textContent;
+        self::assertNotSame('', $signingTime);
+        self::assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/', (string) $signingTime);
+        self::assertFalse(str_ends_with((string) $signingTime, 'Z'), 'SigningTime must use an offset, not UTC');
+    }
+
+    public function testSignatureValueCarriesAnIdAttribute(): void
+    {
+        $xpath = $this->xpath($this->sign());
+
+        self::assertMatchesRegularExpression('/^SignatureValue\d+$/', (string) $xpath->query('//ds:SignatureValue')->item(0)?->getAttribute('Id'));
     }
 
     public function testBase64PayloadsAreWrappedAt76Columns(): void
@@ -111,20 +125,23 @@ final class XadesSignerTest extends TestCase
         }
     }
 
-    public function testNamespacesAreDeclaredOnceOnTheSignatureRoot(): void
+    public function testNamespacesAreDeclaredOnSignatureAndSignedNodes(): void
     {
         $xpath = $this->xpath($this->sign());
-        $signature = $xpath->query('//ds:Signature')->item(0);
 
+        // ds:Signature root carries xmlns:ds.
+        $signature = $xpath->query('//ds:Signature')->item(0);
         self::assertInstanceOf(\DOMElement::class, $signature);
         self::assertTrue($signature->hasAttribute('xmlns:ds'));
-        self::assertTrue($signature->hasAttribute('xmlns:xades'));
 
-        // No redundant declarations deeper inside the signature.
-        $descendants = $signature->getElementsByTagName('*');
-        foreach ($descendants as $element) {
-            self::assertFalse($element->hasAttribute('xmlns:ds'), 'redundant xmlns:ds inside the signature');
-            self::assertFalse($element->hasAttribute('xmlns:xades'), 'redundant xmlns:xades inside the signature');
+        // SignedInfo, KeyInfo and SignedProperties carry both xmlns:ds and
+        // xmlns:etsi (as the SRI reference implementation does, so their
+        // canonical forms are self-contained).
+        foreach (['//ds:SignedInfo', '//ds:KeyInfo', '//etsi:SignedProperties'] as $query) {
+            $node = $xpath->query($query)->item(0);
+            self::assertInstanceOf(\DOMElement::class, $node);
+            self::assertTrue($node->hasAttribute('xmlns:ds'), $query . ' must declare xmlns:ds');
+            self::assertTrue($node->hasAttribute('xmlns:etsi'), $query . ' must declare xmlns:etsi');
         }
     }
 

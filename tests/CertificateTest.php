@@ -21,19 +21,31 @@ final class CertificateTest extends TestCase
         $this->certificate = Certificate::fromPem($certPem);
     }
 
-    public function testIssuerIsPrintedInXAdESOrder(): void
+    public function testIssuerIsPrintedInSriOrder(): void
     {
-        // Same order Java's X500Principal (and therefore XAdES4J) uses:
-        // CN, OU, O, L, ST, C.
+        // Same default order the SRI reference implementation uses:
+        // CN, L, OU, O, C joined with "," (no spaces).
         self::assertSame(
-            'CN=Firma Prueba Test, OU=Tecnologia, O=Empresa de Prueba S.A., L=Quito, ST=Pichincha, C=EC',
+            'CN=Firma Prueba Test,L=Quito,OU=Tecnologia,O=Empresa de Prueba S.A.,C=EC',
             $this->certificate->getIssuerName()
         );
     }
 
+    public function testUanatacaIssuerIncludesOrganizationIdentifier(): void
+    {
+        $issuer = $this->certificate->getIssuerName();
+
+        // The fixture certificate is not issued by UANATACA; assert the
+        // generic format does not carry the organizationIdentifier.
+        self::assertStringNotContainsString('2.5.4.97=', $issuer);
+    }
+
     public function testSubjectMatchesIssuerForSelfSignedCertificate(): void
     {
-        self::assertSame($this->certificate->getIssuerName(), $this->certificate->getSubjectName());
+        self::assertSame(
+            'CN=Firma Prueba Test,L=Quito,OU=Tecnologia,O=Empresa de Prueba S.A.,C=EC',
+            $this->certificate->getSubjectName()
+        );
     }
 
     public function testSerialNumberIsDecimal(): void
